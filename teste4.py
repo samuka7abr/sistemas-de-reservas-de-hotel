@@ -1,103 +1,84 @@
-import datetime
+from flask import Flask, render_template, request, redirect, url_for, flash
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
 
+app = Flask(__name__)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hotel.db'
+app.config['SECRET_KEY'] = 'your_secret_key'
+db = SQLAlchemy(app)
 
-quartos = {}
-reservas = {}
+# Models
+class Room(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    room_number = db.Column(db.String(10), unique=True, nullable=False)
+    room_type = db.Column(db.String(50), nullable=False)
+    price_per_night = db.Column(db.Float, nullable=False)
 
-def menu():
-    print("\n--- Sistema de Reservas de Hotel ---")
-    print("\n1. Adicionar quarto")
-    print("2. Listar quartos disponíveis")
-    print("3. Fazer reserva")
-    print("4. Listar reservas ativas")
-    print("5. Cancelar reserva")
-    print("6. Calcular valor da reserva")
-    print("7. Sair")
-    escolha = input("Escolha uma opção: ")
-    return escolha
+class Reservation(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    customer_name = db.Column(db.String(100), nullable=False)
+    room_id = db.Column(db.Integer, db.ForeignKey('room.id'), nullable=False)
+    check_in = db.Column(db.Date, nullable=False)
+    check_out = db.Column(db.Date, nullable=False)
+    room = db.relationship('Room', backref=db.backref('reservations', lazy=True))
 
-def adicionar_quarto():
-    numero = input("\nNúmero do quarto: ")
-    tipo = input("Tipo do quarto (simples, duplo, suíte): ")
-    preco = float(input("Preço por noite: "))
-    quartos[numero] = {'tipo': tipo, 'preco': preco}
-    print(f"\nQuarto {numero} adicionado com sucesso!")
+# Routes
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-def listar_quartos():
-    if quartos:
-        for numero, detalhes in quartos.items():
-            print(f"\nNúmero: {numero}")
-            print(f"Tipo: {detalhes['tipo']}")
-            print(f"Preço por noite: R${detalhes['preco']:.2f}")
-    else:
-        print("\nNenhum quarto disponível.")
+@app.route('/rooms', methods=['GET', 'POST'])
+def manage_rooms():
+    if request.method == 'POST':
+        room_number = request.form['room_number']
+        room_type = request.form['room_type']
+        price_per_night = float(request.form['price_per_night'])
+        new_room = Room(room_number=room_number, room_type=room_type, price_per_night=price_per_night)
+        try:
+            db.session.add(new_room)
+            db.session.commit()
+            flash('Room added successfully!', 'success')
+        except:
+            flash('Room number already exists.', 'danger')
+    rooms = Room.query.all()
+    return render_template('rooms.html', rooms=rooms)
 
-def fazer_reserva():
-    nome = input("\nNome do cliente: ")
-    numero_quarto = input("Número do quarto: ")
-    if numero_quarto in quartos:
-        check_in = input("Data de check-in (YYYY-MM-DD): ")
-        check_out = input("Data de check-out (YYYY-MM-DD): ")
-        check_in_date = datetime.datetime.strptime(check_in, "%Y-%m-%d")
-        check_out_date = datetime.datetime.strptime(check_out, "%Y-%m-%d")
-        if check_out_date > check_in_date:
-            reservas[nome] = {'numero_quarto': numero_quarto, 'check_in': check_in_date, 'check_out': check_out_date}
-            print(f"\nReserva para {nome} no quarto {numero_quarto} feita com sucesso!")
+@app.route('/reservations', methods=['GET', 'POST'])
+def manage_reservations():
+    rooms = Room.query.all()
+    if request.method == 'POST':
+        customer_name = request.form['customer_name']
+        room_id = int(request.form['room_id'])
+        check_in = datetime.strptime(request.form['check_in'], '%Y-%m-%d').date()
+        check_out = datetime.strptime(request.form['check_out'], '%Y-%m-%d').date()
+
+        if check_out > check_in:
+            new_reservation = Reservation(customer_name=customer_name, room_id=room_id, check_in=check_in, check_out=check_out)
+            db.session.add(new_reservation)
+            db.session.commit()
+            flash('Reservation created successfully!', 'success')
         else:
-            print("\nData de check-out deve ser posterior à data de check-in.")
-    else:
-        print("\nQuarto não encontrado.")
+            flash('Check-out date must be after check-in date.', 'danger')
+    reservations = Reservation.query.all()
+    return render_template('reservations.html', reservations=reservations, rooms=rooms)
 
-def listar_reservas():
-    if reservas:
-        for nome, detalhes in reservas.items():
-            print(f"\nNome do cliente: {nome}")
-            print(f"Quarto: {detalhes['numero_quarto']}")
-            print(f"Check-in: {detalhes['check_in'].strftime('%Y-%m-%d')}")
-            print(f"Check-out: {detalhes['check_out'].strftime('%Y-%m-%d')}")
-    else:
-        print("\nNenhuma reserva ativa.")
+@app.route('/cancel_reservation/<int:reservation_id>')
+def cancel_reservation(reservation_id):
+    reservation = Reservation.query.get_or_404(reservation_id)
+    db.session.delete(reservation)
+    db.session.commit()
+    flash('Reservation canceled successfully!', 'success')
+    return redirect(url_for('manage_reservations'))
 
-def cancelar_reserva():
-    nome = input("\nNome do cliente para cancelar a reserva: ")
-    if nome in reservas:
-        del reservas[nome]
-        print(f"\nReserva de {nome} cancelada com sucesso!")
-    else:
-        print("\nReserva não encontrada.")
+@app.route('/calculate/<int:reservation_id>')
+def calculate_reservation(reservation_id):
+    reservation = Reservation.query.get_or_404(reservation_id)
+    nights = (reservation.check_out - reservation.check_in).days
+    total_price = nights * reservation.room.price_per_night
+    flash(f'Total price for {reservation.customer_name}: ${total_price:.2f}', 'info')
+    return redirect(url_for('manage_reservations'))
 
-def calcular_valor_reserva():
-    nome = input("\nNome do cliente: ")
-    if nome in reservas:
-        detalhes = reservas[nome]
-        numero_quarto = detalhes['numero_quarto']
-        preco_por_noite = quartos[numero_quarto]['preco']
-        noites = (detalhes['check_out'] - detalhes['check_in']).days
-        valor_total = noites * preco_por_noite
-        print(f"\nValor total da reserva para {nome}: R${valor_total:.2f}")
-    else:
-        print("\nReserva não encontrada.")
-
-def main():
-    while True:
-        escolha = menu()
-        if escolha == '1':
-            adicionar_quarto()
-        elif escolha == '2':
-            listar_quartos()
-        elif escolha == '3':
-            fazer_reserva()
-        elif escolha == '4':
-            listar_reservas()
-        elif escolha == '5':
-            cancelar_reserva()
-        elif escolha == '6':
-            calcular_valor_reserva()
-        elif escolha == '7':
-            print("Saindo...")
-            break
-        else:
-            print("\nOpção inválida, tente novamente.")
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True)
