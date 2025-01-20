@@ -4,10 +4,8 @@ from datetime import datetime
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///hotel.db'
-app.config['SECRET_KEY'] = 'your_secret_key'
 db = SQLAlchemy(app)
 
-# Models
 class Room(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     room_number = db.Column(db.String(10), unique=True, nullable=False)
@@ -22,7 +20,6 @@ class Reservation(db.Model):
     check_out = db.Column(db.Date, nullable=False)
     room = db.relationship('Room', backref=db.backref('reservations', lazy=True))
 
-# Routes
 @app.route('/')
 def index():
     return render_template('index.html')
